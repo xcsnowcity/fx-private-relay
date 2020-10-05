@@ -1,4 +1,3 @@
-import contextlib
 from datetime import datetime, timezone
 from email.header import Header
 from email.headerregistry import Address
@@ -6,8 +5,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 from email.utils import parseaddr
-import json
-import os
 
 from botocore.exceptions import ClientError
 import markus
@@ -18,30 +15,11 @@ from django.conf import settings
 from django.http import HttpResponse
 from django.template.defaultfilters import linebreaksbr, urlize
 
+from privaterelay.utils import time_if_enabled, incr_if_enabled
+
 
 logger = logging.getLogger('events')
 metrics = markus.get_metrics('fx-private-relay')
-
-
-def time_if_enabled(name):
-    def timing_decorator(func):
-        def func_wrapper(*args, **kwargs):
-            ctx_manager = (metrics.timer(name) if settings.STATSD_ENABLED
-                           else contextlib.nullcontext())
-            with ctx_manager:
-                return func(*args, **kwargs)
-        return func_wrapper
-    return timing_decorator
-
-
-def incr_if_enabled(name, value=1):
-    if settings.STATSD_ENABLED:
-        metrics.incr(name, value)
-
-
-def histogram_if_enabled(name, value, tags=None):
-    if settings.STATSD_ENABLED:
-        metrics.histogram(name, value=value, tags=None)
 
 
 @time_if_enabled('ses_send_email')
@@ -169,12 +147,6 @@ def urlize_and_linebreaks(text, autoescape=True):
         urlize(text, autoescape=autoescape),
         autoescape=autoescape
     )
-
-
-def get_post_data_from_request(request):
-    if request.content_type == 'application/json':
-        return json.loads(request.body)
-    return request.POST
 
 
 def generate_relay_From(original_from_address):

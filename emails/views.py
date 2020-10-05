@@ -19,15 +19,16 @@ from django.shortcuts import redirect
 from django.template.loader import render_to_string
 from django.views.decorators.csrf import csrf_exempt
 
-from .context_processors import relay_from_domain
-from .models import DeletedAddress, Profile, RelayAddress
-from .utils import (
+from privaterelay.utils import (
     get_post_data_from_request,
-    incr_if_enabled,
+    get_user_profile,
     histogram_if_enabled,
-    ses_relay_email,
-    urlize_and_linebreaks
+    incr_if_enabled,
 )
+
+from .context_processors import relay_from_domain
+from .models import DeletedAddress, RelayAddress
+from .utils import ses_relay_email, urlize_and_linebreaks
 from .sns import verify_from_sns, SUPPORTED_SNS_TYPES
 
 
@@ -56,18 +57,12 @@ def index(request):
     return redirect('profile')
 
 
-def _get_user_profile(request, api_token):
-    if not request.user.is_authenticated:
-        return Profile.objects.get(api_token=api_token)
-    return request.user.profile_set.first()
-
-
 def _index_POST(request):
     request_data = get_post_data_from_request(request)
     api_token = request_data.get('api_token', None)
     if not api_token:
         raise PermissionDenied
-    user_profile = _get_user_profile(request, api_token)
+    user_profile = get_user_profile(request, api_token)
     if request_data.get('method_override', None) == 'PUT':
         return _index_PUT(request_data, user_profile)
     if request_data.get('method_override', None) == 'DELETE':

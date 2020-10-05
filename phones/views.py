@@ -6,12 +6,21 @@ from phonenumbers import PhoneNumberFormat
 from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
 
-from django.core.exceptions import MultipleObjectsReturned
-from django.http import HttpResponse, HttpResponseNotFound
-from django.shortcuts import render
+from django.conf import settings
+from django.contrib import messages
+from django.core.exceptions import MultipleObjectsReturned, PermissionDenied
+from django.http import HttpResponse, HttpResponseNotFound, JsonResponse
+from django.shortcuts import redirect, render
 from django.views.decorators.csrf import csrf_exempt
 
+from privaterelay.utils import (
+    incr_if_enabled,
+    get_post_data_from_request,
+    get_user_profile
+)
+
 from .models import Session
+from .utils import get_available_numbers
 
 
 account_sid = config('TWILIO_ACCOUNT_SID', None)
@@ -50,30 +59,24 @@ def _index_POST(request):
     api_token = request_data.get('api_token', None)
     if not api_token:
         raise PermissionDenied
-    user_profile = _get_user_profile(request, api_token)
-    if request_data.get('method_override', None) == 'PUT':
-        return _index_PUT(request_data, user_profile)
-    if request_data.get('method_override', None) == 'DELETE':
-        return _index_DELETE(request_data, user_profile)
+    user_profile = get_user_profile(request, api_token)
 
     incr_if_enabled('phones_index_post', 1)
-    existing_addresses = RelayAddress.objects.filter(user=user_profile.user)
-    if existing_addresses.count() >= settings.MAX_NUM_BETA_ALIASES:
+    existing_sessions = Session.objects.filter(user=user_profile.user)
+    if existing_sessions.count() >= settings.MAX_NUM_PHONE_SESSIONS:
         if 'moz-extension' in request.headers.get('Origin', ''):
             return HttpResponse('Payment Required', status=402)
         messages.error(
-            request, "You already have 5 email addresses. Please upgrade."
+            request, "You already have %s phone sessions. Please upgrade." %
+            settings.MAX_NUM_PHONE_SESSIONS
         )
         return redirect('profile')
 
-    relay_address = RelayAddress.make_relay_address(user_profile.user)
+    session = Session.make_session_for_user(user_profile.user)
     if 'moz-extension' in request.headers.get('Origin', ''):
-        address_string = '%s@%s' % (
-            relay_address.address, relay_from_domain(request)['RELAY_DOMAIN']
-        )
         return JsonResponse({
-            'id': relay_address.id,
-            'address': address_string
+            'id': session.id,
+            'phone_num': address_string
         }, status=201)
 
     return redirect('profile')
@@ -85,7 +88,7 @@ def main_twilio_webhook(request):
     from_num = request.POST['From']
     body = request.POST['Body'].lower()
 
-    _delete_expired_sessions()
+    Session.delete_expired_sessions()
 
     try:
         ttl_minutes = int(body)
@@ -97,12 +100,9 @@ def main_twilio_webhook(request):
 
     # Check that there are relay numbers available so we don't accidentally
     # create an open session that will be crossed with some other session.
-    available_numbers = _get_available_numbers()
-    if len(available_numbers) == 0:
-        resp.message("No relay numbers available. Try again later.")
-        return HttpResponse(resp)
+    available_numbers = get_available_numbers()
 
-    session, participant = _get_session_and_participant_with_available_number(
+    session, participant = get_session_and_participant_with_available_number(
         available_numbers, ttl_minutes, from_num
     )
     proxy_num = participant.proxy_identifier
@@ -204,27 +204,3 @@ def _delete_expired_sessions():
         expiration__lte=datetime.now()
     )
     expired_sessions.delete()
-
-
-def _get_available_numbers():
-    numbers = service.phone_numbers.list()
-    available_numbers = [
-        number.phone_number for number in numbers if number.in_use == 0
-    ]
-    return available_numbers
-
-
-def _get_session_and_participant_with_available_number(
-    available_numbers, ttl_minutes, from_num
-):
-    # Since Twilio doesn't automatically assign phone numbers that are not
-    # already in use, we need to keep trying to create a session until we get
-    # a session with one of the available numbers.
-    while True:
-        session = service.sessions.create(ttl=ttl_minutes*60,)
-        participant = service.sessions(session.sid).participants.create(
-            identifier=from_num
-        )
-        if participant.proxy_identifier in available_numbers:
-            return session, participant
-        service.sessions(session.twilio_sid).update(status='closed')

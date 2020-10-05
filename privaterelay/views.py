@@ -1,4 +1,3 @@
-from base64 import b64decode
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
@@ -13,14 +12,11 @@ import sentry_sdk
 
 from django.apps import apps
 from django.conf import settings
-from django.contrib.auth.models import User
-from django.core.exceptions import PermissionDenied
 from django.db import connections
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, redirect
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_http_methods
 
 from allauth.socialaccount.models import SocialAccount, SocialApp
 from allauth.socialaccount.providers.fxa.views import (
@@ -28,7 +24,6 @@ from allauth.socialaccount.providers.fxa.views import (
 )
 
 from emails.models import RelayAddress
-from emails.utils import get_post_data_from_request
 
 
 FXA_PROFILE_CHANGE_EVENT = (
