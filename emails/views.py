@@ -300,11 +300,19 @@ def _sns_message(message_json):
         incr_if_enabled('email_suppressed_for_%s_bounce' % bounce_type, 1)
         return HttpResponse("Address is temporarily disabled.")
 
-    if address and not address.enabled:
-        incr_if_enabled('email_for_disabled_address', 1)
-        address.num_blocked += 1
-        address.save(update_fields=['num_blocked'])
-        return HttpResponse("Address is temporarily disabled.")
+    if address:
+        if not address.enabled:
+            incr_if_enabled('email_for_disabled_address', 1)
+            address.num_blocked += 1
+            address.save(update_fields=['num_blocked'])
+            return HttpResponse("Address is temporarily disabled.")
+        if address.block_list_emails:
+            for header in mail['headers']:
+                if header['name'].lower().startswith('list-'):
+                    incr_if_enabled('list_email_for_non_list_address', 1)
+                    address.num_blocked += 1
+                    address.save(update_fields=['num_blocked'])
+                    return HttpResponse("Address does not accept list emails.")
 
     incr_if_enabled('email_for_active_address', 1)
     logger.info('email_relay', extra={

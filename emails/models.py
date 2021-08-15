@@ -201,6 +201,7 @@ class RelayAddress(models.Model):
     num_forwarded = models.PositiveSmallIntegerField(default=0)
     num_blocked = models.PositiveSmallIntegerField(default=0)
     num_spam = models.PositiveSmallIntegerField(default=0)
+    block_list_emails = models.BooleanField(default=True)
 
     def __str__(self):
         return self.address
@@ -266,6 +267,7 @@ class DomainAddress(models.Model):
     num_forwarded = models.PositiveSmallIntegerField(default=0)
     num_blocked = models.PositiveSmallIntegerField(default=0)
     num_spam = models.PositiveSmallIntegerField(default=0)
+    block_list_emails = models.BooleanField(default=True)
 
     def __str__(self):
         return self.address
