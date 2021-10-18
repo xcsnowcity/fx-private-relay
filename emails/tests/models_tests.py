@@ -23,12 +23,15 @@ from ..models import (
     DomainAddress,
     get_domain_numerical,
     has_bad_words,
+    hash_subdomain,
     is_blocklisted,
     NOT_PREMIUM_USER_ERR_MSG,
     Profile,
+    RegisteredSubdomain,
     RelayAddress,
     TRY_DIFFERENT_VALUE_ERR_MSG,
-    valid_available_subdomain
+    valid_available_subdomain,
+    valid_address
 )
 
 TEST_DOMAINS = {'RELAY_FIREFOX_DOMAIN': 'default.com', 'MOZMAIL_DOMAIN': 'test.com'}
@@ -40,6 +43,22 @@ class MiscEmailModelsTest(TestCase):
 
     def test_has_bad_words_without_bad_words(self):
         assert not has_bad_words('happy')
+
+    def test_has_bad_words_exact_match_on_small_words(self):
+        assert has_bad_words('ho')
+        assert not has_bad_words('horse')
+        assert has_bad_words('ass')
+        assert not has_bad_words('cassandra')
+        assert has_bad_words('hell')
+        assert not has_bad_words('shell')
+        assert has_bad_words('bra')
+        assert not has_bad_words('brain')
+        assert has_bad_words('fart')
+        assert not has_bad_words('farther')
+        assert has_bad_words('fu')
+        assert not has_bad_words('funny')
+        assert has_bad_words('poo')
+        assert not has_bad_words('pools')
 
     def test_is_blocklisted_with_blocked_word(self):
         assert is_blocklisted('mozilla')
@@ -104,31 +123,31 @@ class RelayAddressTest(TestCase):
         self.premium_user_profile.server_storage = True
         self.premium_user_profile.save()
 
-    def test_make_relay_address_assigns_to_user(self):
-        relay_address = RelayAddress.make_relay_address(self.user_profile)
+    def test_create_assigns_to_user(self):
+        relay_address = RelayAddress.objects.create(user=self.user_profile.user)
         assert relay_address.user == self.user_profile.user
 
-    def test_make_relay_address_makes_different_addresses(self):
+    def test_create_makes_different_addresses(self):
         for i in range(1000):
-            RelayAddress.make_relay_address(self.premium_user_profile)
+            RelayAddress.objects.create(user=self.premium_user_profile.user)
         # check that the address is unique (deeper assertion that the generated aliases are unique)
         relay_addresses = RelayAddress.objects.filter(
             user=self.premium_user
         ).values_list("address", flat=True)
         assert len(set(relay_addresses)) == 1000
 
-    def test_make_relay_address_premium_user_can_exceed_limit(self):
+    def test_create_premium_user_can_exceed_limit(self):
         for i in range(settings.MAX_NUM_FREE_ALIASES + 1):
-            RelayAddress.make_relay_address(self.premium_user_profile)
+            RelayAddress.objects.create(user=self.premium_user_profile.user)
         relay_addresses = RelayAddress.objects.filter(
             user=self.premium_user
         ).values_list("address", flat=True)
         assert len(relay_addresses) == settings.MAX_NUM_FREE_ALIASES + 1
 
-    def test_make_relay_address_non_premium_user_cannot_pass_limit(self):
+    def test_create_non_premium_user_cannot_pass_limit(self):
         try:
             for i in range(settings.MAX_NUM_FREE_ALIASES + 1):
-                RelayAddress.make_relay_address(self.user_profile)
+                RelayAddress.objects.create(user=self.user_profile.user)
         except CannotMakeAddressException as e:
             assert e.message == NOT_PREMIUM_USER_ERR_MSG.format(
                 f'make more than {settings.MAX_NUM_FREE_ALIASES} aliases'
@@ -140,9 +159,12 @@ class RelayAddressTest(TestCase):
             return
         self.fail("Should have raised CannotMakeSubdomainException")
 
+    @skip(reason="ignore test for code path that we don't actually use")
     @patch('emails.models.DOMAINS', TEST_DOMAINS)
-    def test_make_relay_address_with_specified_domain(self):
-        relay_address = RelayAddress.make_relay_address(self.user_profile, domain='test.com')
+    def test_create_with_specified_domain(self):
+        relay_address = RelayAddress.objects.create(
+            user=self.user_profile.user, domain=2
+        )
         assert relay_address.domain == 2
         assert relay_address.get_domain_display() == 'MOZMAIL_DOMAIN'
         assert relay_address.domain_value == 'test.com'
@@ -175,18 +197,12 @@ class RelayAddressTest(TestCase):
         ).count()
         assert deleted_count == 1
 
-    # trigger a collision by making address_default always return 'aaaaaaaaa'
-    @override_settings(RELAY_FIREFOX_DOMAIN='default.com')
-    @patch.multiple('string', ascii_lowercase='a', digits='')
-    @patch('emails.models.DOMAINS', TEST_DOMAINS)
-    def test_make_relay_address_doesnt_make_dupe_of_deleted(self):
-        test_hash = sha256('aaaaaaaaa'.encode('utf-8')).hexdigest()
-        DeletedAddress.objects.create(address_hash=test_hash)
-        try:
-            RelayAddress.make_relay_address(self.user_profile, domain='default.com')
-        except CannotMakeAddressException:
-            return
-        self.fail("Should have raise CannotMakeAddressException")
+    def test_valid_address_dupe_of_deleted_invalid(self):
+        relay_address = RelayAddress.objects.create(user=baker.make(User))
+        relay_address.delete()
+        assert not valid_address(
+            relay_address.address, relay_address.domain_value
+        )
 
 
 class ProfileTest(TestCase):
@@ -495,6 +511,31 @@ class ProfileTest(TestCase):
         with self.assertRaises(CannotMakeSubdomainException):
             valid_available_subdomain('thisisfine')
 
+    def test_valid_available_subdomain_taken_returns_False_for_inactive_subdomain(self):
+        # subdomains registered in now deleted profiles are considered
+        # inactive subdomains
+        premium_user = baker.make(User)
+        random_sub = random.choice(
+            settings.SUBSCRIPTIONS_WITH_UNLIMITED.split(',')
+        )
+        baker.make(
+            SocialAccount,
+            user=premium_user,
+            provider='fxa',
+            extra_data={'subscriptions': [random_sub]}
+        )
+        premium_profile = Profile.objects.get(user=premium_user)
+        premium_profile.add_subdomain('thisisfine')
+        premium_user.delete()
+
+        registered_subdomain_count = RegisteredSubdomain.objects.filter(
+            subdomain_hash=hash_subdomain('thisisfine')
+        ).count()
+        assert Profile.objects.filter(subdomain='thisisfine').count() == 0
+        assert registered_subdomain_count == 1
+        with self.assertRaises(CannotMakeSubdomainException):
+            valid_available_subdomain('thisisfine')
+
     def test_subdomain_available_with_space_returns_False(self):
         with self.assertRaises(CannotMakeSubdomainException):
             valid_available_subdomain('my domain')
@@ -616,6 +657,38 @@ class ProfileTest(TestCase):
         ):
             assert relay_address.description == test_desc
             assert relay_address.generated_for == test_generated_for
+
+    def test_language_with_no_fxa_extra_data_locale_returns_default_en(self):
+        baker.make(SocialAccount, user=self.profile.user, provider='fxa')
+        assert self.profile.language == 'en'
+
+    def test_language_with_fxa_locale_de_returns_de(self):
+        baker.make(
+            SocialAccount,
+            user=self.profile.user,
+            provider='fxa',
+            extra_data={'locale': 'de,en-US;q=0.9,en;q=0.8'}
+        )
+        assert self.profile.language == 'de'
+
+    @override_settings(PREMIUM_RELEASE_DATE=datetime.fromisoformat('2021-10-27 17:00:00+00:00'))
+    def test_user_joined_before_premium_release_returns_True(self):
+        user = baker.make(
+            User,
+            date_joined=datetime.fromisoformat('2021-10-18 17:00:00+00:00')
+        )
+        profile = Profile.objects.get(user=user)
+        assert profile.joined_before_premium_release
+
+    @override_settings(PREMIUM_RELEASE_DATE=datetime.fromisoformat('2021-10-27 17:00:00+00:00'))
+    def test_user_joined_before_premium_release_returns_False(self):
+        user = baker.make(
+            User,
+            date_joined=datetime.fromisoformat('2021-10-28 17:00:00+00:00')
+        )
+        profile = Profile.objects.get(user=user)
+        assert profile.joined_before_premium_release is False
+
 
 class DomainAddressTest(TestCase):
     def setUp(self):

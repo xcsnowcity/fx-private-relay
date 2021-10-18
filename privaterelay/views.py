@@ -88,7 +88,7 @@ def profile(request):
     return render(request, 'profile.html', context)
 
 
-def settings(request):
+def settings_view(request):
     if (not request.user or request.user.is_anonymous):
         return redirect(reverse('fxa_login'))
     profile = request.user.profile_set.first()
@@ -97,6 +97,14 @@ def settings(request):
     }
 
     return render(request, 'settings.html', context)
+
+def settings_update_view(request):
+    messages.success(
+        request, 'success-settings-update'
+    )
+    return redirect(reverse('profile'))
+
+    # return render(request, 'settings.html', context)
 
 
 @lru_cache(maxsize=None)
@@ -176,9 +184,18 @@ def metrics_event(request):
         request_data.get('label', None),
         request_data.get('value', None),
     )
-    report(
-        settings.GOOGLE_ANALYTICS_ID, request_data.get('ga_uuid'), event_data
-    )
+    try:
+        report(
+            settings.GOOGLE_ANALYTICS_ID,
+            request_data.get('ga_uuid'),
+            event_data
+        )
+    except Exception as e:
+        logger.error('metrics_event', extra={'error': e})
+        return JsonResponse(
+            {'msg': 'Unable to report metrics event.'},
+            status=500
+        )
     return JsonResponse({'msg': 'OK'}, status=200)
 
 
