@@ -5,6 +5,7 @@
 html {
     font-size: 100%;
     scroll-behavior: smooth;
+    height: 100%;
 
     @media (prefers-reduced-motion) {
 
@@ -19,8 +20,8 @@ body {
     font-family: "Inter", Helvetica Neue, Helvetica, Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    min-height: 100vh;
-    background-image: var(--darkBlueGradient);
+    height: 100%;
+    // background-image: var(--darkBlueGradient);
     display: flex;
     flex-direction: column;
     margin: 0;
@@ -174,6 +175,12 @@ button:active {
 
 ::-moz-focus-inner {
     border: 0;
+}
+
+.c-layout-wrapper {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
 }
 
 .how-it-works-steps,
@@ -344,7 +351,6 @@ button:active {
 }
 
 .dashboard-container {
-    height: 100%;
     background-color: $color-mpp-background;
     background-color: $color-grey-05;
     padding-left: 0;
