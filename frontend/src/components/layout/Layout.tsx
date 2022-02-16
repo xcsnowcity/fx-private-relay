@@ -23,6 +23,7 @@ import { NpsSurvey } from "./NpsSurvey";
 import { getRuntimeConfig } from "../../config";
 import { CsatSurvey } from "./CsatSurvey";
 import { InterviewRecruitment } from "./InterviewRecruitment";
+import { WhatsNewMenu } from "./whatsnew/WhatsNewMenu";
 
 export type Props = {
   children: ReactNode;
@@ -70,6 +71,11 @@ export const Layout = (props: Props) => {
     !getRuntimeConfig().featureFlags.csatSurvey &&
     !getRuntimeConfig().featureFlags.interviewRecruitment ? (
       <NpsSurvey />
+    ) : null;
+
+  const whatsNew =
+    isLoggedIn && profiles.data ? (
+      <WhatsNewMenu profile={profiles.data[0]} />
     ) : null;
 
   return (
@@ -123,6 +129,7 @@ export const Layout = (props: Props) => {
           </div>
           <div className={styles.navWrapper}>
             <Navigation />
+            {whatsNew}
           </div>
           <div className={styles.appPickerWrapper}>
             <AppPicker theme={isDark ? "free" : "premium"} />
