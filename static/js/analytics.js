@@ -130,7 +130,7 @@ function setSurveyedCookie() {
 function analyticsSurveyLogic() {
   const csatWrapperEl = document.querySelector(".js-csat-wrapper");
   if (!isGoogleAnalyticsAvailable()) {
-    csatWrapperEl.remove();
+    csatWrapperEl?.remove();
     return;
   }
 
